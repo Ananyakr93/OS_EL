@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
-#include "../../include/logger.h"
+#include "../include/logger.h"
 
 void log_performance(const char *op, struct timeval *start, struct timeval *end, struct rusage *usage_start, struct rusage *usage_end) {
     long seconds = end->tv_sec - start->tv_sec;
