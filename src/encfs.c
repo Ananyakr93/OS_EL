@@ -369,10 +369,20 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Usage: %s <ciphertext-directory> <mountpoint> [FUSE options...]\n", argv[0]);
         return 1;
     }
-    global_cipher_dir = strdup(argv[1]);
-    if (!global_cipher_dir) return 1;
+
+    /* FUSE changes working directory to / when daemonizing.
+       We must resolve the ciphertext path to an absolute path. */
+    char *abs_cipher_dir = realpath(argv[1], NULL);
+    if (!abs_cipher_dir) {
+        perror("realpath ciphertext");
+        return 1;
+    }
+    
+    global_cipher_dir = abs_cipher_dir; /* realpath allocates memory */
+
     struct fuse_args args = FUSE_ARGS_INIT(argc - 1, argv + 1);
     int ret = fuse_main(args.argc, args.argv, &encfs_oper, NULL);
+    
     free(global_cipher_dir);
     fuse_opt_free_args(&args);
     return ret;
