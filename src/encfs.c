@@ -105,7 +105,7 @@ static int encfs_create(const char *path, mode_t mode, struct fuse_file_info *fi
     int fd = open(real_path, O_RDWR | O_CREAT | O_EXCL, mode);
     if (fd == -1) return -errno;
 
-    char meta_path_name[PATH_MAX];
+    char meta_path_name[PATH_MAX + 32];
     snprintf(meta_path_name, sizeof(meta_path_name), "%s.meta", real_path);
 
     struct encfs_file_handle *fh = calloc(1, sizeof(struct encfs_file_handle));
@@ -136,7 +136,7 @@ static int encfs_open(const char *path, struct fuse_file_info *fi) {
     int fd = open(real_path, fi->flags);
     if (fd == -1) return -errno;
 
-    char meta_path_name[PATH_MAX];
+    char meta_path_name[PATH_MAX + 32];
     snprintf(meta_path_name, sizeof(meta_path_name), "%s.meta", real_path);
 
     struct encfs_file_handle *fh = calloc(1, sizeof(struct encfs_file_handle));
@@ -329,7 +329,7 @@ static int encfs_setxattr(const char *path, const char *name, const char *value,
         
         char real_path[PATH_MAX];
         get_real_path(path, real_path, sizeof(real_path));
-        char meta_path[PATH_MAX];
+        char meta_path[PATH_MAX + 32];
         snprintf(meta_path, sizeof(meta_path), "%s.meta", real_path);
         
         file_meta_t meta = {0};
