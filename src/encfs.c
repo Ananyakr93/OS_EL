@@ -322,6 +322,7 @@ static int encfs_release(const char *path, struct fuse_file_info *fi) {
 }
 
 static int encfs_setxattr(const char *path, const char *name, const char *value, size_t size, int flags) {
+    (void)flags;
     if (strcmp(name, "user.enc_policy") == 0) {
         char policy_val[64] = {0};
         if (size > 63) return -ERANGE;
