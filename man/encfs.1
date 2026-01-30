@@ -1,0 +1,90 @@
+.\" Manpage for encfs
+.TH encfs 1 "January 30, 2026" "1.0" "EncFS Variant Manual"
+
+.SH NAME
+encfs \- Encrypted Pass-Through File System (FUSE)
+
+.SH SYNOPSIS
+.B encfs
+mirror_dir mount_point
+.RB [ \-o
+.IR options ]
+
+.SH DESCRIPTION
+.B encfs
+is a cryptographic filesystem in userspace (FUSE). It transparently encrypts files stored in
+.I mirror_dir
+and makes them visible in plaintext at
+.I mount_point
+when mounted with the correct passphrase.
+
+.SH OPTIONS
+.TP
+.B \-o passphrase=PASS
+The passphrase used to derive the master encryption key via PBKDF2.
+
+.TP
+.B \-o mode=speed|secure
+Sets the default encryption mode for new files.
+.RS
+.B speed
+: Uses AES-256-CTR. Optimized for performance using Hybrid Block Compilation (Superblocks).
+.br
+.B secure
+: Uses AES-256-GCM (Galois/Counter Mode). Provides authenticated encryption with per-block tags. (Default)
+.RE
+
+.TP
+.B \-o allow_other
+Allow other users to access the mount point (standard FUSE option).
+
+.SH EXTENDED ATTRIBUTES
+Special file operations are exposed via extended attributes (xattr).
+
+.TP
+.B user.enc_policy
+Set the encryption policy for a file. Values:
+.RS
+.B Speed
+: Switch to AES-CTR mode.
+.br
+.B Secure
+: Switch to AES-GCM mode.
+.br
+.B ALL
+: Encrypt all blocks (Default).
+.br
+.B HEAD:N
+: Encrypt only the first N blocks (useful for huge media files).
+.RE
+
+.TP
+.B user.zk_proof
+Read-only attribute. Reading this attribute generates a (simulated) Zero-Knowledge Proof asserting that the filesystem possesses the decryption key for the file, without revealing the key or content.
+
+.SH INTERNALS
+.SS Metadata
+One `.meta` file is created for every encrypted file. It stores the file-specific IV, encryption mode, policy, and a list of per-block IVs, Tags, and Hashes. The metadata file itself is integrity-protected by an HMAC-SHA256 signature appended to the end.
+
+.SS Superblocks (Hybrid Block Compilation)
+When `mode=speed` is active, the filesystem detects sequential I/O patterns. Requests larger than or equal to 32KB are processed as "Superblocks", reducing syscall overhead by batching encryption/decryption of 8 contiguous blocks.
+
+.SH EXAMPLES
+
+.B Mount with a secure mode:
+.br
+    $ ./encfs ./encrypted ./mnt -o passphrase=secret,mode=secure
+
+.B Switch a specific file to speed mode:
+.br
+    $ setfattr -n user.enc_policy -v "Speed" ./mnt/video.mp4
+
+.B Verify Key Possession (ZK Audit):
+.br
+    $ getfattr -n user.zk_proof ./mnt/sensitive.doc
+
+.SH BUGS
+Depending on the FUSE version, `allow_other` requires `user_allow_other` in `/etc/fuse.conf`.
+
+.SH AUTHOR
+Antigravity Agent (Google DeepMind)

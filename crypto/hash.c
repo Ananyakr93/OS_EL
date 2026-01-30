@@ -1,5 +1,6 @@
 #define OPENSSL_SUPPRESS_DEPRECATED
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <string.h>
 
 void compute_sha256(const unsigned char *data, size_t len,
@@ -26,3 +27,18 @@ void sha256(const unsigned char *data, size_t len,
     SHA256_Final(out_hash, &ctx);
 }
 
+void compute_hmac_sha256(const void *key, size_t key_len,
+                         const unsigned char *data, size_t data_len,
+                         unsigned char *out_mac)
+{
+    unsigned int len = 32;
+    HMAC(EVP_sha256(), key, (int)key_len, data, data_len, out_mac, &len);
+}
+
+int derive_key_pbkdf2(const char *passphrase, const unsigned char *salt, size_t salt_len,
+                      int iterations, unsigned char *out_key, size_t key_len)
+{
+    return PKCS5_PBKDF2_HMAC(passphrase, strlen(passphrase),
+                             salt, (int)salt_len, iterations,
+                             EVP_sha256(), (int)key_len, out_key);
+}

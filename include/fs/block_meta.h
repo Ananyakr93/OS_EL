@@ -13,6 +13,7 @@ typedef struct {
     uint64_t block_index;
     unsigned char iv[16];   /* Max needed for CTR is 16, GCM is 12 */
     unsigned char tag[16];  /* GCM tag */
+    unsigned char block_hash[32]; /* SHA-256 of plaintext */
 } block_meta_entry_t;
 
 typedef struct {
@@ -24,12 +25,14 @@ typedef struct {
 } file_meta_t;
 
 /* Load metadata from a JSON file into a file_meta_t structure.
-   Returns 0 on success, negative errno on failure. */
-int load_file_meta(const char *meta_path, file_meta_t *meta);
+   Verifies HMAC-SHA256 appended to the file.
+   Returns 0 on success, negative errno on failure/EACCES if verification fails. */
+int load_file_meta(const char *meta_path, file_meta_t *meta, const unsigned char *master_key);
 
 /* Save file_meta_t structure to a JSON file.
+   Appends HMAC-SHA256 to the file.
    Returns 0 on success, negative errno on failure. */
-int save_file_meta(const char *meta_path, const file_meta_t *meta);
+int save_file_meta(const char *meta_path, const file_meta_t *meta, const unsigned char *master_key);
 
 /* Helper to free the allocated blocks in meta */
 void free_file_meta(file_meta_t *meta);
