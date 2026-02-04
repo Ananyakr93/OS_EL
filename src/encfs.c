@@ -728,43 +728,42 @@ static struct fuse_operations encfs_oper = {
     .utimens = encfs_utimens,
 };
 
+static int encfs_opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs) {
+    (void)data; (void)outargs;
+    if (key == FUSE_OPT_KEY_NONOPT && global_cipher_dir == NULL) {
+        char *abs = realpath(arg, NULL);
+        if (abs) {
+            global_cipher_dir = abs;
+            return 0; // Consume the argument so FUSE doesn't see it
+        } else {
+            fprintf(stderr, "Error: Cipher directory '%s' not found or invalid.\n", arg);
+            return -1;
+        }
+    }
+    return 1; // Keep the argument (e.g., the mountpoint)
+}
+
 int main(int argc, char *argv[])
 {
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
     struct encfs_config conf = {0};
 
-    // Parse options to get passphrase
-    if (fuse_opt_parse(&args, &conf, encfs_opts, NULL) == -1) {
+    // Parse options: our custom ones + consume the cipher_dir
+    if (fuse_opt_parse(&args, &conf, encfs_opts, encfs_opt_proc) == -1) {
         return 1;
     }
     
+    if (global_cipher_dir == NULL) {
+        fprintf(stderr, "Usage: %s <cipher_dir> <mountpoint> [options]\n", argv[0]);
+        return 1;
+    }
+
     if (conf.mode) {
         if (strcmp(conf.mode, "speed") == 0) default_enc_mode = MODE_SPEED;
         else if (strcmp(conf.mode, "secure") == 0) default_enc_mode = MODE_SECURE;
         else {
             fprintf(stderr, "Invalid mode: %s. Use 'speed' or 'secure'.\n", conf.mode);
             return 1;
-        }
-    }
-
-    // Checking for cipherdir index is tricky with fuse opts.
-    // Assume typical usage: ./encfs mirrored mountpoint -o ...
-    
-    char *cipher_dir_arg = NULL;
-    for (int i = 1; i < args.argc; i++) {
-        if (args.argv[i][0] != '-') {
-            cipher_dir_arg = args.argv[i];
-            break; 
-        }
-    }
-    
-    if (cipher_dir_arg) {
-        char *abs = realpath(cipher_dir_arg, NULL);
-        if (abs) {
-            global_cipher_dir = abs;
-        } else {
-             perror("realpath");
-             return 1;
         }
     }
 
