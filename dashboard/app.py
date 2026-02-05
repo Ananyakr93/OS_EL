@@ -1,132 +1,245 @@
-from flask import Flask, render_template, request, jsonify
-import subprocess
 import os
-import re
-import json
+import subprocess
+import shutil
 import time
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify
 
 app = Flask(__name__)
+app.secret_key = 'super-secret-encfs-key'  # Needed for flashing messages
 
-# Config
+# Configuration
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 ENCFS_BIN = os.path.join(ROOT_DIR, 'encfs')
-CIPHER_DIR = os.path.join(ROOT_DIR, 'ciphertext')
+CIPHER_DIR = os.path.join(ROOT_DIR, 'cipher')
 MOUNT_POINT = os.path.join(ROOT_DIR, 'mnt')
 PERF_LOG = os.path.join(ROOT_DIR, 'encfs_perf.log')
+BENCH_SCRIPT = os.path.join(ROOT_DIR, 'tests', 'performance_benchmark.sh')
+GRAPH_SCRIPT = os.path.join(ROOT_DIR, 'tests', 'generate_perf_graphs.py')
+GRAPH_DIR = os.path.join(ROOT_DIR, 'benchmark_results', 'graphs')
+USE_SUDO = os.environ.get('USE_SUDO', '0') == '1'
 
 # Ensure directories exist
 os.makedirs(CIPHER_DIR, exist_ok=True)
 os.makedirs(MOUNT_POINT, exist_ok=True)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+def run_command(cmd, check=True):
+    """Run a command, handling sudo if configured."""
+    if USE_SUDO and cmd[0] != 'sudo':
+        cmd = ['sudo'] + cmd
+    return subprocess.run(cmd, check=check, capture_output=True, text=True)
 
-@app.route('/api/status')
-def status():
-    # Check if mounted
-    mounted = False
+def is_mounted():
+    """Check if file system is mounted."""
+    # Method 1: Check contents (if not empty, likely mounted)
+    # Method 2: Check /proc/mounts
     try:
-        # Linux method
         with open('/proc/mounts', 'r') as f:
             for line in f:
                 if MOUNT_POINT in line:
-                    mounted = True
-                    break
+                    return True
     except FileNotFoundError:
-        # Windows/other - check if mount point dir has contents
-        try:
-            if os.path.isdir(MOUNT_POINT) and os.listdir(MOUNT_POINT):
-                mounted = True  # Assume mounted if non-empty
-        except:
-            pass
-    return jsonify({'mounted': mounted, 'mount_point': MOUNT_POINT})
+        # Fallback for non-Linux or simple check
+        pass
+    return False
 
-@app.route('/api/mount', methods=['POST'])
-def mount():
-    data = request.json
-    passphrase = data.get('passphrase', 'test')
-    mode = data.get('mode', 'secure')
+@app.route('/')
+def index():
+    return render_template('home.html', mounted=is_mounted(), mount_point=MOUNT_POINT, active_page='home')
+
+@app.route('/explorer')
+def explorer():
+    files = []
+    if is_mounted():
+        try:
+            for entry in os.scandir(MOUNT_POINT):
+                policy = "Unknown"
+                if entry.is_file():
+                    try:
+                        cmd = ['getfattr', '-n', 'user.enc_policy', '--only-values', entry.path]
+                        # Don't use sudo for getfattr usually, but if mounted by root...
+                        # If mounted with allow_other, regular user can access.
+                        res = subprocess.run(cmd, capture_output=True, text=True) 
+                        if res.returncode == 0:
+                            policy = res.stdout.strip()
+                        else:
+                            policy = "Default"
+                    except:
+                        pass
+                
+                size_str = f"{entry.stat().st_size} B"
+                if entry.stat().st_size > 1024:
+                    size_str = f"{entry.stat().st_size / 1024:.1f} KB"
+                
+                files.append({
+                    'name': entry.name,
+                    'is_dir': entry.is_dir(),
+                    'size': size_str,
+                    'policy': policy
+                })
+        except PermissionError:
+             flash('Permission denied accessing mount point.', 'danger')
+        except Exception as e:
+             flash(f'Error listing files: {str(e)}', 'danger')
+    return render_template('explorer.html', files=files, mounted=is_mounted(), active_page='explorer')
+
+@app.route('/benchmarks')
+def benchmarks():
+    return render_template('benchmarks.html', active_page='benchmarks')
+
+@app.route('/logs')
+def logs():
+    log_lines = []
+    if os.path.exists(PERF_LOG):
+        try:
+            with open(PERF_LOG, 'r') as f:
+                log_lines = f.readlines()[-100:]
+        except Exception as e:
+            log_lines = [f"Error reading log: {str(e)}"]
+    else:
+        log_lines = ["Log file not found."]
+    return render_template('logs.html', logs=log_lines, active_page='logs')
+
+@app.route('/action/mount', methods=['POST'])
+def mount_fs():
+    passphrase = request.form.get('passphrase')
+    mode = request.form.get('mode')
     
     cmd = [ENCFS_BIN, CIPHER_DIR, MOUNT_POINT, '-o', f'passphrase={passphrase},mode={mode}']
+    
     try:
-        # Run in background? FUSE runs in foreground unless -f not passed?
-        # Our encfs code calls fuse_main. fuse_main usually forks unless -f.
-        # So subprocess.run should return quickly if it forks?
-        # Wait, if it fails, we want to know.
-        # Ideally, we add '&' in shell or Popen.
-        subprocess.Popen(cmd)
-        time.sleep(1) # Wait for init
-        return jsonify({'success': True})
+        # Popen is safer for FUSE as it blocks
+        # For mount, we usually want to wait a bit to ensure it didn't fail immediately
+        
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        try:
+            outs, errs = proc.communicate(timeout=2)
+            if proc.returncode != 0:
+               flash(f'Mount failed: {errs.decode()}', 'danger')
+               return redirect(url_for('index'))
+        except subprocess.TimeoutExpired:
+            # If it times out, it might still be running (FUSE daemonizing).
+            # But normally encfs might daemonize unless -f is used.
+            # If it runs successfully, it returns 0.
+            pass
+        
+        time.sleep(1) # Wait for mount
+        if is_mounted():
+            flash('Filesystem mounted successfully.', 'success')
+        else:
+            flash('Mount command executed but filesystem is not mounted. Check logs.', 'warning')
+            
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        flash(f'Error mounting: {str(e)}', 'danger')
+        
+    return redirect(url_for('index'))
 
-@app.route('/api/unmount', methods=['POST'])
-def unmount():
+@app.route('/action/unmount', methods=['POST'])
+def unmount_fs():
     try:
-        subprocess.run(['fusermount', '-u', MOUNT_POINT], check=True)
-        return jsonify({'success': True})
-    except subprocess.CalledProcessError as e:
-        return jsonify({'success': False, 'error': str(e)})
+        cmd = ['fusermount', '-u', MOUNT_POINT]
+        if USE_SUDO:
+            cmd = ['sudo'] + cmd
+            
+        subprocess.run(cmd, check=True)
+        
+        # Verify unmount
+        if not is_mounted():
+            flash('Filesystem unmounted successfully.', 'success')
+        else:
+            flash('Unmount command ran but filesystem is still mounted (maybe busy?).', 'warning')
+    except Exception as e:
+        flash(f'Error unmounting: {str(e)}', 'danger')
+    return redirect(url_for('index'))
 
-@app.route('/api/files')
-def list_files():
+@app.route('/action/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        flash('No file part', 'danger')
+        return redirect(url_for('explorer'))
+    file = request.files['file']
+    if file.filename == '':
+        flash('No selected file', 'danger')
+        return redirect(url_for('explorer'))
+    
+    if file:
+        filename = file.filename
+        try:
+            file.save(os.path.join(MOUNT_POINT, filename))
+            flash(f'File {filename} uploaded successfully.', 'success')
+        except Exception as e:
+            flash(f'Error uploading file: {str(e)}', 'danger')
+            
+    return redirect(url_for('explorer'))
+
+@app.route('/action/delete', methods=['POST'])
+def delete_file():
+    filename = request.form.get('filename')
+    path = os.path.join(MOUNT_POINT, filename)
     try:
-        files = []
-        for entry in os.scandir(MOUNT_POINT):
-            stats = entry.stat()
-            file_info = {
-                'name': entry.name,
-                'path': entry.path,
-                'is_dir': entry.is_dir(),
-                'size': stats.st_size,
-                'policy': 'Unknown'
-            }
-            # Try get policy if file
-            if entry.is_file():
-                try:
-                    res = subprocess.run(['getfattr', '-n', 'user.enc_policy', '--only-values', entry.path], 
-                                         capture_output=True, text=True)
-                    if res.returncode == 0:
-                        file_info['policy'] = res.stdout.strip()
-                    else:
-                        file_info['policy'] = 'Default (ALL)'
-                except:
-                    pass
-            files.append(file_info)
-        return jsonify(files)
-    except OSError:
-        return jsonify([])
+        if os.path.exists(path):
+            os.remove(path)
+            flash(f'File {filename} deleted.', 'success')
+        else:
+            flash('File not found.', 'warning')
+    except Exception as e:
+        flash(f'Error deleting file: {str(e)}', 'danger')
+    return redirect(url_for('explorer'))
 
-@app.route('/api/policy', methods=['POST'])
+@app.route('/action/policy', methods=['POST'])
 def set_policy():
-    data = request.json
-    filename = data.get('filename')
-    policy = data.get('policy')
+    filename = request.form.get('filename')
+    policy = request.form.get('policy')
     path = os.path.join(MOUNT_POINT, filename)
     
     try:
-        subprocess.run(['setfattr', '-n', 'user.enc_policy', '-v', policy, path], check=True)
-        return jsonify({'success': True})
+        subprocess.run(['setfattr', '-n', 'user.enc_policy', '-v', policy, path], check=True, capture_output=True)
+        flash(f'Policy set to {policy} for {filename}.', 'success')
+    except subprocess.CalledProcessError as e:
+        flash(f'Failed to set policy: {e.stderr.decode() if e.stderr else str(e)}', 'danger')
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        flash(f'Error: {str(e)}', 'danger')
+        
+    return redirect(url_for('explorer'))
 
-@app.route('/api/perf')
-def get_perf():
-    # Read last N lines of log
-    data = []
-    if os.path.exists(PERF_LOG):
-        with open(PERF_LOG, 'r') as f:
-            lines = f.readlines()[-50:] # last 50
-            for line in lines:
-                # Op: read, Latency: 0.000123 s, UserCPU: ...
-                m = re.search(r'Op: (\w+), Latency: ([\d.]+) s', line)
-                if m:
-                    data.append({
-                        'op': m.group(1),
-                        'latency': float(m.group(2)) * 1000 # to ms
-                    })
-    return jsonify(data)
+@app.route('/api/proof')
+def get_proof():
+    filename = request.args.get('filename')
+    path = os.path.join(MOUNT_POINT, filename)
+    try:
+        res = subprocess.run(['getfattr', '-n', 'user.zk_proof', '--only-values', path], capture_output=True, text=True)
+        if res.returncode == 0:
+            return jsonify({'proof': res.stdout.strip()})
+        else:
+            return jsonify({'error': 'Could not fetch proof (maybe not supported or error)'})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/action/benchmark', methods=['POST'])
+def run_benchmark():
+    try:
+        # Run benchmark script
+        cmd = [BENCH_SCRIPT]
+        if USE_SUDO:
+            cmd = ['sudo'] + cmd
+            
+        subprocess.Popen(cmd) # Run in background
+        flash('Benchmark started in background. Check logs or wait for completion.', 'info')
+    except Exception as e:
+        flash(f'Error starting benchmark: {str(e)}', 'danger')
+    return redirect(url_for('benchmarks'))
+
+@app.route('/action/graphs', methods=['POST'])
+def generate_graphs():
+    try:
+        subprocess.run(['python3', GRAPH_SCRIPT], check=True)
+        flash('Graphs generated successfully.', 'success')
+    except Exception as e:
+        flash(f'Error generating graphs: {str(e)}', 'danger')
+    return redirect(url_for('benchmarks'))
+
+@app.route('/graphs/<filename>')
+def get_graph(filename):
+    return send_file(os.path.join(GRAPH_DIR, filename))
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000, host='0.0.0.0')
+    app.run(debug=True, host='0.0.0.0', port=5000)
