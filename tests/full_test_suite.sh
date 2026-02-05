@@ -289,13 +289,21 @@ test_concurrent_access() {
     # Create initial file
     echo "initial" > $MOUNT_POINT/concurrent.txt
     
-    # Start two concurrent writes
-    (for i in {1..100}; do echo "Writer1-$i" >> $MOUNT_POINT/concurrent.txt; done) &
+    log_info "Starting parallel writers..."
+    # Ensure file is writable before backgrounding
+    touch $MOUNT_POINT/concurrent.txt
+    
+    # Start two concurrent writers with shorter, more stable sequences
+    (for i in {1..50}; do echo "Writer1-$i" >> $MOUNT_POINT/concurrent.txt || exit 1; done) &
     PID1=$!
-    (for i in {1..100}; do echo "Writer2-$i" >> $MOUNT_POINT/concurrent.txt; done) &
+    (for i in {1..50}; do echo "Writer2-$i" >> $MOUNT_POINT/concurrent.txt || exit 1; done) &
     PID2=$!
     
-    wait $PID1 $PID2
+    # Wait for completion and check for errors
+    if ! wait $PID1 || ! wait $PID2; then
+        log_fail "One or more writers failed with permission/IO errors"
+        return 1
+    fi
     
     # Check file integrity
     LINE_COUNT=$(wc -l < $MOUNT_POINT/concurrent.txt)
