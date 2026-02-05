@@ -89,18 +89,6 @@ def explorer():
 def benchmarks():
     return render_template('benchmarks.html', active_page='benchmarks')
 
-@app.route('/logs')
-def logs():
-    log_lines = []
-    if os.path.exists(PERF_LOG):
-        try:
-            with open(PERF_LOG, 'r') as f:
-                log_lines = f.readlines()[-100:]
-        except Exception as e:
-            log_lines = [f"Error reading log: {str(e)}"]
-    else:
-        log_lines = ["Log file not found."]
-    return render_template('logs.html', logs=log_lines, active_page='logs')
 
 @app.route('/education')
 def education():
@@ -261,6 +249,57 @@ def generate_graphs():
 def get_graph(filename):
     return send_file(os.path.join(GRAPH_DIR, filename))
 
+@app.route('/api/file_content')
+def get_file_content():
+    """Returns file content (decrypted text or encrypted hex dump)."""
+    filename = request.args.get('filename')
+    ctype = request.args.get('type') # 'decrypted' or 'encrypted'
+    
+    if not filename or not ctype:
+        return jsonify({'error': 'Missing parameters'}), 400
+
+    path = ""
+    if ctype == 'decrypted':
+        path = os.path.join(MOUNT_POINT, filename)
+    elif ctype == 'encrypted':
+        path = os.path.join(CIPHER_DIR, filename)
+    else:
+        return jsonify({'error': 'Invalid type'}), 400
+
+    if not os.path.exists(path):
+         return jsonify({'error': 'File not found'}), 404
+
+    try:
+        # Limit to 4KB to prevent hanging the browser
+        with open(path, 'rb') as f:
+            data = f.read(4096)
+            
+        if ctype == 'decrypted':
+            try:
+                # Try UTF-8 first
+                content = data.decode('utf-8')
+                return jsonify({'content': content, 'format': 'text'})
+            except UnicodeDecodeError:
+                return jsonify({'content': '[Binary or non-UTF8 content cannot be displayed directly]', 'format': 'text'})
+        else:
+            # Hex dump for encrypted content
+            # Format: 00000000: 00 11 22 ...  | ...text...
+            formatted = ""
+            for i in range(0, len(data), 16):
+                chunk = data[i:i+16]
+                hex_chunk = ' '.join(f'{b:02x}' for b in chunk)
+                # Printable ASCII or dot
+                text_chunk = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+                formatted += f'{i:08x}: {hex_chunk:<47}  |{text_chunk}|\n'
+            
+            if len(data) == 4096:
+                formatted += "\n... (Truncated at 4KB) ..."
+                
+            return jsonify({'content': formatted, 'format': 'hex'})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ==========================================
 # JSON API Endpoints (for test_dashboard.sh)
 # ==========================================
@@ -306,18 +345,6 @@ def api_files():
             pass
     return jsonify(files)
 
-@app.route('/api/perf')
-def api_perf():
-    """Returns performance logs as JSON."""
-    log_lines = []
-    if os.path.exists(PERF_LOG):
-        try:
-            with open(PERF_LOG, 'r') as f:
-                # Basic parsing: assume CSV or similar, but for now just returning lines
-                log_lines = [{'line': line.strip()} for line in f.readlines()[-100:]]
-        except:
-            pass
-    return jsonify(log_lines)
 
 @app.route('/api/mount', methods=['POST'])
 def api_mount():

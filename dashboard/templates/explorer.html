@@ -41,6 +41,10 @@
                                 data-bs-toggle="tooltip" title="Get ZK Proof">
                                 <i class="fas fa-shield-alt"></i>
                             </button>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="viewContent('{{ file.name }}')"
+                                data-bs-toggle="tooltip" title="View Content">
+                                <i class="fas fa-eye"></i>
+                            </button>
                             <button class="btn btn-sm btn-outline-warning me-1" onclick="setupPolicy('{{ file.name }}')"
                                 data-bs-toggle="tooltip" title="Set Policy">
                                 <i class="fas fa-cog"></i>
@@ -148,6 +152,46 @@
     </div>
 </div>
 
+<!-- Content Viewer Modal -->
+<div class="modal fade" id="contentModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content glass-panel">
+            <div class="modal-header border-bottom-0">
+                <h5 class="modal-title text-white">File Content: <span id="contentTitle" class="fw-bold"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs mb-3 border-secondary" id="contentTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active text-white" id="decrypted-tab" data-bs-toggle="tab"
+                            data-bs-target="#decrypted-pane" type="button">Decrypted (Plaintext)</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link text-white-50" id="encrypted-tab" data-bs-toggle="tab"
+                            data-bs-target="#encrypted-pane" type="button">Encrypted (Ciphertext)</button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="contentTabsContent">
+                    <div class="tab-pane fade show active" id="decrypted-pane" role="tabpanel">
+                        <pre class="p-3 bg-dark rounded border border-secondary text-white-50" id="decryptedContent"
+                            style="max-height: 400px; overflow: auto;">Loading...</pre>
+                    </div>
+                    <div class="tab-pane fade" id="encrypted-pane" role="tabpanel">
+                        <pre class="p-3 bg-dark rounded border border-secondary text-white-50 font-monospace"
+                            id="encryptedContent" style="max-height: 400px; overflow: auto;">Loading...</pre>
+                    </div>
+                </div>
+                <div class="alert alert-warning mt-3 mb-0 py-2">
+                    <small><i class="fas fa-exclamation-triangle me-1"></i> Showing first 4KB only.</small>
+                </div>
+            </div>
+            <div class="modal-footer border-top-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -176,6 +220,35 @@
             })
             .catch(err => {
                 document.getElementById('proofContent').innerText = "Network Error";
+            });
+    }
+
+    function viewContent(filename) {
+        document.getElementById('contentTitle').innerText = filename;
+        document.getElementById('decryptedContent').innerText = "Loading...";
+        document.getElementById('encryptedContent').innerText = "Loading...";
+
+        var myModal = new bootstrap.Modal(document.getElementById('contentModal'));
+        myModal.show();
+
+        // Fetch Decrypted
+        fetch(`{{ url_for('get_file_content') }}?filename=${filename}&type=decrypted`)
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('decryptedContent').innerText = data.content || data.error;
+            })
+            .catch(err => {
+                document.getElementById('decryptedContent').innerText = "Error fetching decrypted content: " + err;
+            });
+
+        // Fetch Encrypted
+        fetch(`{{ url_for('get_file_content') }}?filename=${filename}&type=encrypted`)
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('encryptedContent').innerText = data.content || data.error;
+            })
+            .catch(err => {
+                document.getElementById('encryptedContent').innerText = "Error fetching encrypted content: " + err;
             });
     }
 </script>
