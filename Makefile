@@ -13,7 +13,8 @@ SRCS = $(SRC_DIR)/encfs.c \
        $(FS_DIR)/path.c \
        $(FS_DIR)/block_meta.c \
        $(FS_DIR)/zk_proof.c \
-       $(SRC_DIR)/logger.c
+       $(SRC_DIR)/logger.c \
+       $(SRC_DIR)/globals.c
 
 OBJS = $(SRCS:.c=.o)
 TARGET = encfs

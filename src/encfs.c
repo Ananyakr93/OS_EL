@@ -34,8 +34,6 @@
 
 #define SUPERBLOCK_SIZE 32768
 #define BLOCKS_PER_SUPER 8
-
-char *global_cipher_dir = NULL;
 int default_enc_mode = MODE_SECURE; 
 
 struct encfs_config {
