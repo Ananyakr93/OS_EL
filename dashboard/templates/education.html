@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="text-white mb-3">Privacy-Preserving Auditing</h2>
+        <div class="card glass-panel p-4">
+            <h5 class="card-title text-info mb-3">What is Zero-Knowledge Proof (ZKP)?</h5>
+            <p class="text-white">
+                A Zero-Knowledge Proof allows one party (the prover) to prove to another party (the verifier) that a
+                statement is true, without revealing any information beyond the validity of the statement itself.
+            </p>
+            <p class="text-white">
+                In NovaFS, we use ZKPs to prove that you possess the correct decryption key for a file <strong>without
+                    ever revealing the key itself</strong> to the auditor or the server.
+            </p>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card glass-panel h-100">
+            <div class="card-header bg-transparent border-bottom-0">
+                <h5 class="card-title text-white">How it Works</h5>
+            </div>
+            <div class="card-body text-white">
+                <ol>
+                    <li class="mb-2"><strong>Setup:</strong> The file is encrypted with a master key.</li>
+                    <li class="mb-2"><strong>Challenge:</strong> An auditor requests proof of ownership.</li>
+                    <li class="mb-2"><strong>Proof Generation:</strong> NovaFS generates a cryptographic proof using the
+                        file's metadata and the user's key.</li>
+                    <li class="mb-2"><strong>Verification:</strong> The auditor verifies the proof against the public
+                        metadata. If it matches, they know the user has the key.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card glass-panel h-100">
+            <div class="card-header bg-transparent border-bottom-0">
+                <h5 class="card-title text-white">Benefits</h5>
+            </div>
+            <div class="card-body text-white">
+                <ul class="list-unstyled">
+                    <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i> <strong>No Key
+                            Leakage:</strong> Your password never leaves your device.</li>
+                    <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i> <strong>Compliance:</strong>
+                        Meets strict data privacy regulations (GDPR, HIPAA).</li>
+                    <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i> <strong>Trustless:</strong>
+                        You don't need to trust the auditor with your secrets.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -70,4 +70,43 @@
         </div>
     </div>
 </div>
+
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card glass-panel h-100">
+            <div class="card-header bg-transparent border-bottom-0">
+                <h5 class="card-title text-white">Benchmark Progress</h5>
+            </div>
+            <div class="card-body">
+                <div id="benchLog"
+                    class="p-3 bg-dark rounded border border-secondary font-monospace text-break text-white-50"
+                    style="height: 300px; overflow-y: auto; font-size: 0.8rem;">
+                    Ready to start...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function updateLog() {
+        fetch('/api/bench_log')
+            .then(response => response.json())
+            .then(data => {
+                const logDiv = document.getElementById('benchLog');
+                if (data.log && data.log.trim().length > 0) {
+                    if (logDiv.innerText !== data.log) {
+                        logDiv.innerText = data.log;
+                        logDiv.scrollTop = logDiv.scrollHeight;
+                    }
+                }
+            })
+            .catch(err => console.error(err));
+    }
+
+    // Poll every 1 second
+    setInterval(updateLog, 1000);
+</script>
 {% endblock %}

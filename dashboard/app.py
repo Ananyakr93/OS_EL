@@ -16,6 +16,7 @@ PERF_LOG = os.path.join(ROOT_DIR, 'encfs_perf.log')
 BENCH_SCRIPT = os.path.join(ROOT_DIR, 'tests', 'performance_benchmark.sh')
 GRAPH_SCRIPT = os.path.join(ROOT_DIR, 'tests', 'generate_perf_graphs.py')
 GRAPH_DIR = os.path.join(ROOT_DIR, 'benchmark_results', 'graphs')
+BENCH_LOG = os.path.join(ROOT_DIR, 'benchmark_progress.log')
 # Configurable sudo usage via environment variable
 USE_SUDO = os.environ.get('USE_SUDO', '0') == '1'
 
@@ -23,6 +24,11 @@ USE_SUDO = os.environ.get('USE_SUDO', '0') == '1'
 os.makedirs(CIPHER_DIR, exist_ok=True)
 os.makedirs(MOUNT_POINT, exist_ok=True)
 os.makedirs(os.path.dirname(PERF_LOG), exist_ok=True)
+# Ensure log files exist
+if not os.path.exists(PERF_LOG):
+    open(PERF_LOG, 'a').close()
+if not os.path.exists(BENCH_LOG):
+    open(BENCH_LOG, 'a').close()
 
 def is_mounted():
     """Check if file system is mounted using os.path.ismount or /proc/mounts."""
@@ -95,6 +101,22 @@ def logs():
     else:
         log_lines = ["Log file not found."]
     return render_template('logs.html', logs=log_lines, active_page='logs')
+
+@app.route('/education')
+def education():
+    return render_template('education.html', active_page='education')
+
+@app.route('/api/bench_log')
+def api_bench_log():
+    """Returns benchmark progress log."""
+    content = ""
+    if os.path.exists(BENCH_LOG):
+        try:
+            with open(BENCH_LOG, 'r') as f:
+                content = f.read()[-5000:] # Last 5KB
+        except:
+            pass
+    return jsonify({'log': content})
 
 @app.route('/action/mount', methods=['POST'])
 def mount_fs():
@@ -220,7 +242,7 @@ def run_benchmark():
         if USE_SUDO:
             cmd = ['sudo'] + cmd
             
-        subprocess.Popen(cmd) # Run in background
+        subprocess.Popen(cmd, cwd=ROOT_DIR) # Run in background
         flash('Benchmark started in background. Check logs for progress.', 'info')
     except Exception as e:
         flash(f'Error starting benchmark: {str(e)}', 'danger')
@@ -238,6 +260,113 @@ def generate_graphs():
 @app.route('/graphs/<filename>')
 def get_graph(filename):
     return send_file(os.path.join(GRAPH_DIR, filename))
+
+# ==========================================
+# JSON API Endpoints (for test_dashboard.sh)
+# ==========================================
+
+@app.route('/api/status')
+def api_status():
+    """Returns filesystem status as JSON."""
+    return jsonify({
+        'mounted': is_mounted(),
+        'mount_point': MOUNT_POINT
+    })
+
+@app.route('/api/files')
+def api_files():
+    """Returns file list as JSON."""
+    files = []
+    if is_mounted():
+        try:
+            for entry in os.scandir(MOUNT_POINT):
+                policy = "Unknown"
+                if entry.is_file():
+                    try:
+                        cmd = ['getfattr', '-n', 'user.enc_policy', '--only-values', entry.path]
+                        res = subprocess.run(cmd, capture_output=True, text=True) 
+                        if res.returncode == 0:
+                            policy = res.stdout.strip()
+                        else:
+                            policy = "Default"
+                    except:
+                        pass
+                
+                size_str = f"{entry.stat().st_size} B"
+                if entry.stat().st_size > 1024:
+                    size_str = f"{entry.stat().st_size / 1024:.1f} KB"
+                
+                files.append({
+                    'name': entry.name,
+                    'is_dir': entry.is_dir(),
+                    'size': size_str,
+                    'policy': policy
+                })
+        except:
+            pass
+    return jsonify(files)
+
+@app.route('/api/perf')
+def api_perf():
+    """Returns performance logs as JSON."""
+    log_lines = []
+    if os.path.exists(PERF_LOG):
+        try:
+            with open(PERF_LOG, 'r') as f:
+                # Basic parsing: assume CSV or similar, but for now just returning lines
+                log_lines = [{'line': line.strip()} for line in f.readlines()[-100:]]
+        except:
+            pass
+    return jsonify(log_lines)
+
+@app.route('/api/mount', methods=['POST'])
+def api_mount():
+    """JSON version of mount action."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON data'}), 400
+        
+    passphrase = data.get('passphrase')
+    mode = data.get('mode')
+    
+    cmd = [ENCFS_BIN, CIPHER_DIR, MOUNT_POINT, '-o', f'passphrase={passphrase},mode={mode}']
+    
+    try:
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            outs, errs = proc.communicate(timeout=2)
+            if proc.returncode != 0:
+                return jsonify({'error': errs if errs else "Unknown error"}), 500
+        except subprocess.TimeoutExpired:
+            pass
+        
+        time.sleep(1)
+        if is_mounted():
+            return jsonify({'success': True, 'message': 'Mounted successfully'})
+        else:
+            return jsonify({'error': 'Mount command executed but filesystem not mounted'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/policy', methods=['POST'])
+def api_set_policy():
+    """JSON version of set policy."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON data'}), 400
+        
+    filename = data.get('filename')
+    policy = data.get('policy')
+    path = os.path.join(MOUNT_POINT, filename)
+    
+    try:
+        subprocess.run(['setfattr', '-n', 'user.enc_policy', '-v', policy, path], check=True, capture_output=True)
+        return jsonify({'success': True, 'message': f'Policy set to {policy}'})
+    except subprocess.CalledProcessError as e:
+         return jsonify({'error': e.stderr.decode() if e.stderr else str(e)}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

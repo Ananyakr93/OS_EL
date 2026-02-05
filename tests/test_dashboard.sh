@@ -32,6 +32,8 @@ echo "=== Dashboard UI Tests ==="
 
 # Start dashboard
 echo "Starting dashboard..."
+# Ensure clean state
+fusermount3 -u -q mnt || true
 cd dashboard
 python3 app.py &
 DASHBOARD_PID=$!

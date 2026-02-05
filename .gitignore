@@ -1,0 +1,7 @@
+mnt/
+cipher/
+encfs
+*.o
+*.log
+__pycache__/
+benchmark_results/

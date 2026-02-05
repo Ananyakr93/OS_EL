@@ -24,6 +24,7 @@ PASSPHRASE="benchmarkpassword123"
 RESULTS_DIR=./benchmark_results
 RESULTS_CSV=$RESULTS_DIR/performance_results.csv
 PERF_LOG=encfs_perf.log
+BENCH_LOG=benchmark_progress.log
 TEST_SIZE_MB=${1:-1024}  # Default 1GB
 
 # Test file paths
@@ -39,6 +40,10 @@ echo ""
 
 # Create results directory
 mkdir -p $RESULTS_DIR
+
+# Redirect output to log file (and tee to stdout if interactive, but here just log)
+echo "Benchmark starting at $(date)" > $BENCH_LOG
+exec > >(tee -a $BENCH_LOG) 2>&1
 
 # Initialize CSV with headers
 echo "Scenario,Mode,Operation,Size_MB,Throughput_MBps,Latency_ms,CPU_User_pct,CPU_Sys_pct,Integrity_Checked,ZK_Proof_Generated" > $RESULTS_CSV
@@ -60,7 +65,7 @@ setup_encfs() {
     local mode=$1
     cleanup
     mkdir -p $MOUNT_POINT $CIPHER_DIR
-    $ENCFS_BIN $CIPHER_DIR $MOUNT_POINT -o passphrase=$PASSPHRASE,mode=$mode &
+    $ENCFS_BIN $CIPHER_DIR $MOUNT_POINT -o passphrase=$PASSPHRASE,mode=$mode > $PERF_LOG 2>&1 &
     sleep 2
     
     if ! grep -qs "$MOUNT_POINT" /proc/mounts; then
