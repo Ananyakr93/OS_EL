@@ -48,13 +48,24 @@ exec > >(tee -a $BENCH_LOG) 2>&1
 # Initialize CSV with headers
 echo "Scenario,Mode,Operation,Size_MB,Throughput_MBps,Latency_ms,CPU_User_pct,CPU_Sys_pct,Integrity_Checked,ZK_Proof_Generated" > $RESULTS_CSV
 
+# Check sudo availability
+CAN_SUDO=false
+if sudo -n true 2>/dev/null; then
+    CAN_SUDO=true
+    echo -e "${GREEN}[INFO]${NC} Sudo available (non-interactive)"
+else
+    echo -e "${YELLOW}[WARN]${NC} Sudo requires password or not available. Skipping privileged operations."
+fi
+
 # ============================================================
 # Helper Functions
 # ============================================================
 cleanup() {
     echo -e "${YELLOW}[CLEANUP]${NC} Unmounting filesystems..."
     fusermount -u $MOUNT_POINT 2>/dev/null || true
-    sudo umount $ECRYPTFS_MNT 2>/dev/null || true
+    if [ "$CAN_SUDO" = true ]; then
+        sudo -n umount $ECRYPTFS_MNT 2>/dev/null || true
+    fi
     rm -rf $MOUNT_POINT $CIPHER_DIR
     rm -rf $ECRYPTFS_MNT $PLAIN_DIR
     pkill -f "encfs.*$CIPHER_DIR" 2>/dev/null || true
@@ -76,6 +87,11 @@ setup_encfs() {
 }
 
 setup_ecryptfs() {
+    if [ "$CAN_SUDO" = false ]; then
+        echo -e "${YELLOW}[SKIP]${NC} eCryptfs benchmark requires sudo"
+        return 1
+    fi
+
     mkdir -p $ECRYPTFS_MNT
     mkdir -p /tmp/ecryptfs_backing
     
@@ -87,7 +103,7 @@ setup_ecryptfs() {
     
     # Simple ecryptfs mount (may require kernel module)
     echo "$PASSPHRASE" | ecryptfs-add-passphrase --fnek 2>/dev/null || true
-    sudo mount -t ecryptfs /tmp/ecryptfs_backing $ECRYPTFS_MNT \
+    sudo -n mount -t ecryptfs /tmp/ecryptfs_backing $ECRYPTFS_MNT \
         -o ecryptfs_cipher=aes,ecryptfs_key_bytes=32,ecryptfs_passthrough=n,no_sig_cache,ecryptfs_enable_filename_crypto=n 2>/dev/null || return 1
     
     echo -e "${GREEN}[OK]${NC} eCryptfs mounted"
@@ -136,7 +152,9 @@ run_dd_benchmark() {
     
     if [ "$operation" == "write" ]; then
         # Drop caches before write test
-        sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&1 || true
+        if [ "$CAN_SUDO" = true ]; then
+            sync; echo 3 | sudo -n tee /proc/sys/vm/drop_caches > /dev/null 2>&1 || true
+        fi
         
         # Timed write
         local output=$(dd if=/dev/zero of="$test_file" bs=1M count=$size_mb conv=fdatasync 2>&1)
@@ -146,7 +164,9 @@ run_dd_benchmark() {
         # dd if=/dev/urandom of="$test_file" bs=1M count=$size_mb conv=fdatasync 2>&1
     else
         # Drop caches before read test
-        sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&1 || true
+        if [ "$CAN_SUDO" = true ]; then
+            sync; echo 3 | sudo -n tee /proc/sys/vm/drop_caches > /dev/null 2>&1 || true
+        fi
         
         local output=$(dd if="$test_file" of=/dev/null bs=1M 2>&1)
         local throughput=$(echo "$output" | grep -oP '[\d.]+\s*[MG]B/s' | head -1 | sed 's/ //g')
