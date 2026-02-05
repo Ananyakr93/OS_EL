@@ -69,12 +69,14 @@ setup() {
 mount_fs() {
     local pass="${1:-$PASSPHRASE}"
     local mode="${2:-secure}"
-    $ENCFS_BIN $CIPHER_DIR $MOUNT_POINT -o passphrase=$pass,mode=$mode &
+    # Added allow_other to ensure background subshells can access the mount
+    $ENCFS_BIN $CIPHER_DIR $MOUNT_POINT -o passphrase=$pass,mode=$mode,allow_other &
     sleep 2
 }
 
 unmount_fs() {
-    fusermount -u $MOUNT_POINT 2>/dev/null || true
+    # Use lazy unmount (-z) to ensure clean state even if processes are slow to exit
+    fusermount -uz $MOUNT_POINT 2>/dev/null || true
     sleep 1
 }
 
