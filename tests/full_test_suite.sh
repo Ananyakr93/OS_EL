@@ -37,17 +37,17 @@ echo "========================================" | tee -a $TEST_RESULTS
 # Helper functions
 log_pass() {
     echo -e "${GREEN}[PASS]${NC} $1" | tee -a $TEST_RESULTS
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 log_fail() {
     echo -e "${RED}[FAIL]${NC} $1" | tee -a $TEST_RESULTS
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 log_skip() {
     echo -e "${YELLOW}[SKIP]${NC} $1" | tee -a $TEST_RESULTS
-    ((SKIPPED++))
+    SKIPPED=$((SKIPPED + 1))
 }
 
 log_info() {
