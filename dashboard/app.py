@@ -33,7 +33,8 @@ def is_mounted():
     try:
         with open('/proc/mounts', 'r') as f:
             for line in f:
-                if MOUNT_POINT in line:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == MOUNT_POINT:
                     return True
     except FileNotFoundError:
         pass
