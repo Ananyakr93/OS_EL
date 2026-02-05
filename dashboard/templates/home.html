@@ -19,9 +19,13 @@
                 </div>
 
                 {% if mounted %}
-                <form action="{{ url_for('unmount_fs') }}" method="POST">
+                <form action="{{ url_for('unmount_fs') }}" method="POST" class="d-flex gap-2">
                     <button type="submit" class="btn btn-danger btn-lg px-4">
                         <i class="fas fa-eject me-2"></i>Unmount
+                    </button>
+                    <button type="submit" name="lazy" value="true" class="btn btn-outline-danger btn-lg px-4"
+                        title="Force Unmount (Lazy)">
+                        <i class="fas fa-bomb me-2"></i>Force
                     </button>
                 </form>
                 {% else %}

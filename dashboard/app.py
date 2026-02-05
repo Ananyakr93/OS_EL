@@ -16,29 +16,26 @@ PERF_LOG = os.path.join(ROOT_DIR, 'encfs_perf.log')
 BENCH_SCRIPT = os.path.join(ROOT_DIR, 'tests', 'performance_benchmark.sh')
 GRAPH_SCRIPT = os.path.join(ROOT_DIR, 'tests', 'generate_perf_graphs.py')
 GRAPH_DIR = os.path.join(ROOT_DIR, 'benchmark_results', 'graphs')
+# Configurable sudo usage via environment variable
 USE_SUDO = os.environ.get('USE_SUDO', '0') == '1'
 
 # Ensure directories exist
 os.makedirs(CIPHER_DIR, exist_ok=True)
 os.makedirs(MOUNT_POINT, exist_ok=True)
-
-def run_command(cmd, check=True):
-    """Run a command, handling sudo if configured."""
-    if USE_SUDO and cmd[0] != 'sudo':
-        cmd = ['sudo'] + cmd
-    return subprocess.run(cmd, check=check, capture_output=True, text=True)
+os.makedirs(os.path.dirname(PERF_LOG), exist_ok=True)
 
 def is_mounted():
-    """Check if file system is mounted."""
-    # Method 1: Check contents (if not empty, likely mounted)
-    # Method 2: Check /proc/mounts
+    """Check if file system is mounted using os.path.ismount or /proc/mounts."""
+    if os.path.ismount(MOUNT_POINT):
+        return True
+    
+    # Fallback/Double-check for some FUSE setups (especially in Docker/WSL where ismount might be picky)
     try:
         with open('/proc/mounts', 'r') as f:
             for line in f:
                 if MOUNT_POINT in line:
                     return True
     except FileNotFoundError:
-        # Fallback for non-Linux or simple check
         pass
     return False
 
@@ -55,9 +52,8 @@ def explorer():
                 policy = "Unknown"
                 if entry.is_file():
                     try:
+                        # Attempt to get policy; requires no sudo if user_allow_other is set, or running as root
                         cmd = ['getfattr', '-n', 'user.enc_policy', '--only-values', entry.path]
-                        # Don't use sudo for getfattr usually, but if mounted by root...
-                        # If mounted with allow_other, regular user can access.
                         res = subprocess.run(cmd, capture_output=True, text=True) 
                         if res.returncode == 0:
                             policy = res.stdout.strip()
@@ -107,26 +103,22 @@ def mount_fs():
     cmd = [ENCFS_BIN, CIPHER_DIR, MOUNT_POINT, '-o', f'passphrase={passphrase},mode={mode}']
     
     try:
-        # Popen is safer for FUSE as it blocks
-        # For mount, we usually want to wait a bit to ensure it didn't fail immediately
-        
-        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        # Popen allows us to capture startup errors without blocking forever
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         try:
             outs, errs = proc.communicate(timeout=2)
             if proc.returncode != 0:
-               flash(f'Mount failed: {errs.decode()}', 'danger')
+               flash(f'Mount failed: {errs if errs else "Unknown error (check logs)"}', 'danger')
                return redirect(url_for('index'))
         except subprocess.TimeoutExpired:
-            # If it times out, it might still be running (FUSE daemonizing).
-            # But normally encfs might daemonize unless -f is used.
-            # If it runs successfully, it returns 0.
+            # Timeout usually means success for FUSE (it daemonized)
             pass
         
-        time.sleep(1) # Wait for mount
+        time.sleep(1) # Allow slight delay for mount to register
         if is_mounted():
             flash('Filesystem mounted successfully.', 'success')
         else:
-            flash('Mount command executed but filesystem is not mounted. Check logs.', 'warning')
+            flash('Mount command executed but filesystem is not detected as mounted. Check permissions or logs.', 'warning')
             
     except Exception as e:
         flash(f'Error mounting: {str(e)}', 'danger')
@@ -135,20 +127,26 @@ def mount_fs():
 
 @app.route('/action/unmount', methods=['POST'])
 def unmount_fs():
+    lazy = request.form.get('lazy') == 'true'
     try:
-        cmd = ['fusermount', '-u', MOUNT_POINT]
+        cmd = ['fusermount', '-u']
+        if lazy:
+            cmd.append('-z') # Lazy unmount
+        cmd.append(MOUNT_POINT)
+        
         if USE_SUDO:
             cmd = ['sudo'] + cmd
             
-        subprocess.run(cmd, check=True)
+        res = subprocess.run(cmd, capture_output=True, text=True)
         
-        # Verify unmount
-        if not is_mounted():
+        if res.returncode == 0:
             flash('Filesystem unmounted successfully.', 'success')
         else:
-            flash('Unmount command ran but filesystem is still mounted (maybe busy?).', 'warning')
+            error_msg = res.stderr.strip() if res.stderr else "Unknown error"
+            flash(f'Unmount failed: {error_msg}. Try using Force Unmount if busy.', 'danger')
+            
     except Exception as e:
-        flash(f'Error unmounting: {str(e)}', 'danger')
+        flash(f'Error executing unmount: {str(e)}', 'danger')
     return redirect(url_for('index'))
 
 @app.route('/action/upload', methods=['POST'])
@@ -210,20 +208,19 @@ def get_proof():
         if res.returncode == 0:
             return jsonify({'proof': res.stdout.strip()})
         else:
-            return jsonify({'error': 'Could not fetch proof (maybe not supported or error)'})
+            return jsonify({'error': 'Could not fetch proof'})
     except Exception as e:
         return jsonify({'error': str(e)})
 
 @app.route('/action/benchmark', methods=['POST'])
 def run_benchmark():
     try:
-        # Run benchmark script
         cmd = [BENCH_SCRIPT]
         if USE_SUDO:
             cmd = ['sudo'] + cmd
             
         subprocess.Popen(cmd) # Run in background
-        flash('Benchmark started in background. Check logs or wait for completion.', 'info')
+        flash('Benchmark started in background. Check logs for progress.', 'info')
     except Exception as e:
         flash(f'Error starting benchmark: {str(e)}', 'danger')
     return redirect(url_for('benchmarks'))
